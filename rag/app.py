@@ -13,8 +13,15 @@ from src.vector_store import create_chroma, get_embeddings, get_retriever
 
 st.set_page_config(page_title="Motor Laws Chatbot", page_icon="ML", layout="wide")
 st.title("Motor Laws Chatbot")
-st.caption("Ask questions about the Motor Vehicles Act, or upload your challan PDF to receive answers based on both the law and your document.")
+st.caption(
+    """
+Ask questions about Indian Motor Vehicle laws.
 
+You can also upload a challan PDF to get answers based on:
+- Motor Vehicles Act
+- Your uploaded document
+"""
+)
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -69,28 +76,61 @@ def current_source_signature(include_challan, challan_file):
 
 
 with st.sidebar:
+
     st.subheader("Data Sources")
-    include_challan = st.toggle("Include challan PDF", value=False)
+
+    include_challan = st.toggle(
+        "Include challan PDF",
+        value=False
+    )
+
+
+    if st.button(
+        "🗑️ Clear Chat",
+        use_container_width=True
+    ):
+        st.session_state.messages = []
+        st.session_state.source_signature = None
+        
+        st.rerun()
+
+
 
     challan_file = None
     if include_challan:
-        challan_file = st.file_uploader("Upload challan PDF", type=["pdf"])
+        challan_file = st.file_uploader("Upload challan PDF", type=["pdf"], key="challan_uploader")
         if challan_file is None:
             st.info("Upload a challan PDF to answer using both sources.")
 
 
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-
+        st.markdown(
+            message["content"],
+            unsafe_allow_html=True
+)
 user_question = st.chat_input("Ask your question")
 
 if user_question:
-    st.session_state.messages.append({"role": "user", "content": user_question})
 
-    source_signature = current_source_signature(include_challan, challan_file)
+    st.session_state.messages.append(
+        {
+            "role": "user",
+            "content": user_question
+        }
+    )
 
-    with st.spinner("Retrieving and generating answer..."):
+
+    with st.chat_message("user"):
+        st.markdown(user_question)
+
+
+    source_signature = current_source_signature(
+        include_challan,
+        challan_file
+    )
+
+    with st.spinner("Searching documents and generating answer..."):
         vector_db = build_vector_db(*source_signature)
         retriever = get_retriever(vector_db, k=4)
         rag_chain = create_rag_chain(retriever)

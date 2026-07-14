@@ -1,12 +1,12 @@
 """
-llm.py
+rag_chain.py
 
-This module is responsible for:
+Responsible for:
 
-1. Loading the LLM
-2. Creating the Prompt Template
-3. Creating the Document Chain
-4. Creating the Retrieval Chain
+1. Loading LLM
+2. Creating prompts
+3. Creating document chain
+4. Creating retrieval chain
 """
 
 from operator import itemgetter
@@ -15,7 +15,10 @@ from langchain_groq import ChatGroq
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+from langchain_core.runnables import (
+    RunnableLambda,
+    RunnablePassthrough
+)
 
 
 # =====================================================
@@ -23,54 +26,93 @@ from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 # =====================================================
 
 def load_llm():
-    """
-    Loads the Groq LLM.
-
-    You can change the model name later if required.
-    """
 
     llm = ChatGroq(
         model="llama-3.1-8b-instant",
-        temperature=0,
+        temperature=0.1
     )
 
     return llm
 
 
+
 # =====================================================
-# PROMPT TEMPLATE
+# ANSWER PROMPT
 # =====================================================
 
 def get_prompt():
 
     prompt = ChatPromptTemplate.from_template(
         """
-You are a helpful AI assistant.
+You are a legal assistant specializing in Indian Motor Vehicle laws.
 
-Use the conversation history when it helps resolve follow-up questions.
+Answer the user's question using ONLY the provided context.
 
-Answer ONLY from the provided context.
+Rules:
+- Explain the answer clearly.
+- Combine information from multiple context sections if required.
+- If the context does not contain enough information, say:
+  "I could not find this information in the provided documents."
+- Do not invent sections, penalties, or legal provisions.
+- Do not mention the context or documents in your answer.
 
-If the answer is not present in the context,
-say "I don't know."
+Context:
 
-Conversation history:
-{chat_history}
-
-<context>
 {context}
-</context>
+
 
 Question:
+
 {input}
+
+
+Answer:
 """
     )
 
     return prompt
 
 
+
 # =====================================================
-# DOCUMENT CHAIN
+# QUESTION REWRITE PROMPT
+# =====================================================
+
+def get_question_rewrite_prompt():
+
+    prompt = ChatPromptTemplate.from_template(
+        """
+Rewrite the user's question into a standalone question.
+
+Use previous conversation only to resolve references like:
+- it
+- this
+- that section
+- above penalty
+- previous document
+
+If the question is already standalone, return it unchanged.
+
+Conversation history:
+
+{chat_history}
+
+
+Current question:
+
+{input}
+
+
+Standalone question:
+"""
+    )
+
+    return prompt
+
+
+
+# =====================================================
+# CHAINS
 # =====================================================
 
 def create_document_chain():
@@ -82,33 +124,137 @@ def create_document_chain():
     return prompt | llm | StrOutputParser()
 
 
-def _format_docs(documents):
-    """
-    Convert retrieved documents into a single context string for the prompt.
-    """
 
-    return "\n\n".join(doc.page_content for doc in documents)
+def create_question_rewriter():
+
+    llm = load_llm()
+
+    prompt = get_question_rewrite_prompt()
+
+    return prompt | llm | StrOutputParser()
+
 
 
 # =====================================================
-# RETRIEVAL CHAIN
+# FORMAT DOCUMENTS
+# =====================================================
+
+def _format_docs(documents):
+
+    formatted_docs = []
+
+    for doc in documents:
+
+        source = doc.metadata.get(
+            "source_type",
+            "unknown"
+        )
+
+        page = doc.metadata.get(
+            "page",
+            "unknown"
+        )
+
+        filename = doc.metadata.get(
+            "uploaded_filename",
+            ""
+        )
+
+
+        formatted_docs.append(
+            f"""
+Source: {source}
+Page: {page}
+File: {filename}
+
+Content:
+{doc.page_content}
+"""
+        )
+
+
+    return "\n\n".join(formatted_docs)
+
+
+
+# =====================================================
+# RAG CHAIN
 # =====================================================
 
 def create_rag_chain(retriever):
 
+    question_rewriter = create_question_rewriter()
+
     document_chain = create_document_chain()
 
-    chain = RunnablePassthrough.assign(
-        context=itemgetter("input") | retriever,
-    ).assign(
-        answer=RunnableLambda(
-            lambda payload: {
-                "context": _format_docs(payload["context"]),
-                "input": payload["input"],
-                "chat_history": payload.get("chat_history", ""),
+
+    def rewrite_question(payload):
+
+        history = payload.get(
+            "chat_history",
+            ""
+        )
+
+
+        if not history:
+            return payload["input"]
+
+
+        rewritten = question_rewriter.invoke(
+            {
+                "chat_history": history,
+                "input": payload["input"]
             }
         )
-        | document_chain,
+
+
+        return rewritten.strip()
+
+
+
+    chain = (
+        RunnablePassthrough.assign(
+            standalone_question=RunnableLambda(
+                rewrite_question
+            )
+        )
+
+        .assign(
+            context=itemgetter(
+                "standalone_question"
+            )
+            |
+            retriever
+        )
+
+
+        .assign(
+
+            answer=
+
+            RunnableLambda(
+
+                lambda payload:
+
+                {
+                    "context":
+                    _format_docs(
+                        payload["context"]
+                    ),
+
+                    "input":
+                    payload["standalone_question"]
+
+                }
+
+            )
+
+            |
+            document_chain
+
+        )
+
     )
+
 
     return chain

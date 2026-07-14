@@ -34,15 +34,19 @@ def create_chroma(documents, embeddings):
         embedding=embeddings,
     )
 
-
 def get_retriever(db, k=4):
     """
-    Returns a retriever from the vector database.
+    Returns an improved retriever from the vector database.
     """
 
-    return db.as_retriever(search_kwargs={"k": k})
-
-
+    return db.as_retriever(
+        search_type="mmr",
+        search_kwargs={
+            "k": k,
+            "fetch_k": 10,
+            "lambda_mult": 0.5
+        }
+    )
 def similarity_search(db, query):
     """
     Performs similarity search on the vector database.
