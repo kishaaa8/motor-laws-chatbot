@@ -2,6 +2,10 @@ langchain
 langchain-community
 langchain-openai
 langchain-text-splitters
+langchain-groq
+langchain_huggingface
+
+streamlit
 
 chromadb
 faiss-cpu
@@ -15,3 +19,5 @@ pypdf
 tiktoken
 
 openai
+
+sentence-transformers

@@ -1,59 +1,110 @@
+"""
+ingestion.py
+
+Minimal document loaders for local text, local PDF, web URL,
+and uploaded PDF files.
+"""
+
+import os
+import tempfile
 from pathlib import Path
-import bs4
 
-from langchain_community.document_loaders import (
-    TextLoader,
-    WebBaseLoader,
-    PyPDFLoader,
-)
-
-# Project root (rag/)
-BASE_DIR = Path(__file__).resolve().parent.parent
-
-SPEECH_PATH = BASE_DIR / "speech.txt"
-PDF_PATH = BASE_DIR / "attention_isalluneed.pdf"
+from langchain_community.document_loaders import PyPDFLoader, TextLoader, WebBaseLoader
 
 
-def load_text():
-
-    loader = TextLoader(str(SPEECH_PATH))
-
-    return loader.load()
+RAG_DIR = Path(__file__).resolve().parents[1]
+DEFAULT_PDF_PATH = RAG_DIR / "motor_laws.pdf"
+DEFAULT_TEXT_PATH = RAG_DIR / "guide.txt"
 
 
-def load_pdf():
+def load_pdf(pdf_path=None):
+    """
+    Load the motor laws PDF (or a provided PDF path).
+    """
 
-    loader = PyPDFLoader(str(PDF_PATH))
+    target = Path(pdf_path) if pdf_path else DEFAULT_PDF_PATH
 
-    return loader.load()
+    if not target.exists():
+        raise FileNotFoundError(f"PDF file not found: {target}")
+
+    documents = PyPDFLoader(str(target)).load()
+
+    for doc in documents:
+        doc.metadata["source_type"] = "motor_laws"
+
+    return documents
 
 
-def load_web():
+def load_text(text_path=None):
+    """
+    Load a local text file.
+    """
 
-    loader = WebBaseLoader(
-        web_paths=(
-            "https://lilianweng.github.io/posts/2023-06-23-agent/",
-        ),
-        bs_kwargs=dict(
-            parse_only=bs4.SoupStrainer(
-                class_=("post-title", "post-content", "post-header")
-            )
-        ),
-    )
+    target = Path(text_path) if text_path else DEFAULT_TEXT_PATH
 
-    return loader.load()
+    if not target.exists():
+        raise FileNotFoundError(f"Text file not found: {target}")
 
-if __name__ == "__main__":
+    return TextLoader(str(target), encoding="utf-8").load()
 
-    print("===== Testing Text Loader =====")
-    text_docs = load_text()
-    print(f"Loaded {len(text_docs)} document(s)")
-    print(text_docs[0].page_content[:100])   # First 100 characters
 
-    print("\n===== Testing PDF Loader =====")
-    pdf_docs = load_pdf()
-    print(f"Loaded {len(pdf_docs)} pages")
+def load_web(url="https://docs.smith.langchain.com/"):
+    """
+    Load data from a web page URL.
+    """
 
-    print("\n===== Testing Web Loader =====")
-    web_docs = load_web()
-    print(f"Loaded {len(web_docs)} web document(s)")
+    return WebBaseLoader(url).load()
+
+
+def load_uploaded_pdf(uploaded_file):
+    """
+    Load a PDF uploaded from Streamlit's file uploader.
+    """
+
+    if uploaded_file is None:
+        return []
+
+    suffix = Path(uploaded_file.name).suffix or ".pdf"
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+        tmp_file.write(uploaded_file.getvalue())
+        tmp_path = tmp_file.name
+
+    try:
+        documents = PyPDFLoader(tmp_path).load()
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+    for doc in documents:
+        doc.metadata["source_type"] = "challan"
+        doc.metadata["uploaded_filename"] = uploaded_file.name
+
+    return documents
+
+
+def load_uploaded_pdf_bytes(file_bytes, filename="uploaded.pdf"):
+    """
+    Load an uploaded PDF from raw bytes.
+    """
+
+    if not file_bytes:
+        return []
+
+    suffix = Path(filename).suffix or ".pdf"
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+        tmp_file.write(file_bytes)
+        tmp_path = tmp_file.name
+
+    try:
+        documents = PyPDFLoader(tmp_path).load()
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+    for doc in documents:
+        doc.metadata["source_type"] = "challan"
+        doc.metadata["uploaded_filename"] = filename
+
+    return documents
