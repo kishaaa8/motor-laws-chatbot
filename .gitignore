@@ -26,4 +26,9 @@ build/
 dist/
 *.egg-info/
 
+attention_isalluneed.pdf 
+guide.txt 
+speech.txt 
+simplerag.txt 
+main.py
 
